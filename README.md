@@ -1,116 +1,178 @@
 # Investment Research Assistant
 
-AI-powered investment due diligence with **source attribution**. Given a company,
-the platform gathers evidence from regulatory filings, the company's own website,
-and web/news search, then cleans, deduplicates, and scores that evidence so every
-downstream claim can be traced back to the bytes it came from and weighed by how
-much to trust it.
+AI-powered investment due diligence with **source attribution**. Give it a
+company name; it gathers evidence from regulatory filings, the company's own
+website, and web/news search, validates and scores that evidence, runs a
+citation-enforced LLM analysis, and produces an investment memo in which
+**every sourced claim is a numbered footnote back to the bytes it came from**
+— exportable as Markdown, HTML, or PDF.
 
-The guiding principle: an unsourced or mis-attributed fact is worse than a missing
-one. Every datum is an **`Evidence`** record carrying its verbatim source payload,
-source URL, timestamps, and a reliability score — see
-[ADR 0001](docs/adr/0001-evidence-first-architecture.md).
+The guiding principle: an unsourced or mis-attributed fact is worse than a
+missing one. Every datum is an **`Evidence`** record carrying its verbatim
+payload, source URL, timestamps, and reliability score; every analytical
+claim is a **`Finding`** labeled *sourced*, *inferred*, or *assumption* — and
+a "sourced" claim that can't cite real evidence is downgraded, visibly, to an
+inference. Facts and guesses never blur.
 
-## Status
-
-Early development. Built and tested so far:
-
-| Phase | Scope | State |
-|-------|-------|-------|
-| 0 / 1 | Evidence model + collector adapters (SEC EDGAR, Firecrawl, SerpAPI), credential-driven registry, typed errors, retry/resilience | Done |
-| 2 | Data-processing pipeline: cleaning, dedupe, entity resolution, rule-based NER, reliability scoring, conflict surfacing, timeline | In progress |
-
-Everything below Phase 2 is **roadmap, not built** — see [Roadmap](#roadmap).
-
-## Architecture
+## How it works
 
 ```
-                 built ─────────────────┐   ┌──────────── roadmap ────────────┐
-  collectors/  ───►  processors/  ───►   │   │  llm + analysis  ───►  reports  ───►  api + frontend
-  (evidence)        (validation)         │   │
+POST /research
+     │
+     ▼
+┌────────────┐   ┌─────────────┐   ┌────────────┐   ┌────────────┐
+│ COLLECTING │──►│ VALIDATING  │──►│ ANALYZING  │──►│ GENERATING │──► memo
+│ collectors/│   │ processors/ │   │ analysis/  │   │  reports/  │   (md/html/pdf)
+└────────────┘   └─────────────┘   └─────┬──────┘   └────────────┘
+ SEC EDGAR        clean → dedupe →       │ llm/  (Anthropic │ OpenAI │ Gemini)
+ Firecrawl        entity-resolve →       │ structured output + citation
+ SerpAPI          confidence →           │ enforcement, cost budget
+ (auto-enable     conflicts → timeline   │
+  by credential)  quarantine, never delete
 ```
 
-- **`collectors/`** — one adapter per data provider, all emitting the same
-  `Evidence` records. A registry auto-enables each collector when its credentials
-  are present (SEC EDGAR needs none and is always on). Reliability priors: SEC
-  EDGAR `0.98`, Firecrawl website `0.9`, SerpAPI web/news `0.65`.
-- **`processors/`** — the `ValidationPipeline`: clean → dedupe → entity-resolve →
-  confidence → conflicts → timeline, producing a `ProcessedCorpus`. Transforms are
-  immutable (raw payloads are never mutated), entity mismatches are quarantined
-  rather than deleted, and source conflicts are surfaced rather than auto-resolved.
-  See [ADR 0002](docs/adr/0002-data-processing-pipeline.md).
-- **`core/`** — shared config (`Settings`, loaded from env/`.env`) and domain types
-  (`DataCategory`, `JobStage`, `Basis`, `Confidence`).
+- **`collectors/`** — one adapter per provider, all emitting `Evidence`. The
+  registry auto-enables each collector when its credentials exist; keyless
+  SEC EDGAR is always on. Reliability priors: SEC `0.98`, website `0.9`,
+  search `0.65`. ([ADR 0001](docs/adr/0001-evidence-first-architecture.md))
+- **`processors/`** — the validation pipeline: clean → dedupe →
+  entity-resolve → confidence → conflicts → timeline. Off-target evidence is
+  quarantined, never deleted; conflicting figures (two sizes for one funding
+  round) are surfaced, never auto-resolved.
+  ([ADR 0002](docs/adr/0002-data-processing-pipeline.md))
+- **`llm/`** — provider-agnostic structured output over raw HTTP (no vendor
+  SDKs), with schema validation (one repair retry) and **citation
+  enforcement**: sourced findings must cite real evidence IDs or they are
+  downgraded to inferred with a warning.
+  ([ADR 0003](docs/adr/0003-llm-abstraction-and-citation-enforcement.md))
+- **`analysis/`** — a declarative roster of passes (company profile, market,
+  team, funding, traction, risks) plus a synthesis, run sequentially under a
+  hard per-job cost budget. The risks pass sees unresolved conflicts and
+  quarantine stats — source disagreement *is* risk signal.
+  ([ADR 0004](docs/adr/0004-analysis-passes-and-orchestration.md))
+- **`orchestration/` + `reports/`** — the job pipeline with per-stage timing;
+  one failing source degrades the job to PARTIAL instead of killing it. The
+  memo renders with numbered source footnotes, a data-quality section, the
+  event timeline, and diagnostics.
+- **`api/` + `frontend/`** — FastAPI (async jobs, Prometheus metrics) and a
+  React client (submit → live stage progress → interactive memo).
+  ([ADR 0005](docs/adr/0005-api-and-single-container-deployment.md))
 
 ## Quickstart
 
-Requires Python 3.11+.
+### Backend (Python 3.11+)
 
 ```bash
-# 1. Create and activate a virtual environment
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
-# 2. Install the package with dev dependencies
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-
-# 3. Configure credentials (all data-provider keys are optional)
-cp .env.example .env             # then edit .env
-
-# 4. Run the test suite
-pytest
+cp .env.example .env               # add keys; all data-provider keys optional
+uvicorn api.app:app --reload       # http://localhost:8000/docs
 ```
 
-Collectors auto-enable based on which keys are set in `.env`. With no keys at all,
-the keyless SEC EDGAR collector still runs — the system degrades gracefully rather
-than requiring a full key set.
+With no data-provider keys, keyless SEC EDGAR still collects. `POST /research`
+needs one LLM key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or
+`GEMINI_API_KEY`) matching `LLM_PROVIDER`.
+
+### Frontend (Node 20+)
+
+```bash
+cd frontend
+npm install
+npm run dev                        # http://localhost:5173 (proxies API to :8000)
+```
+
+### Docker (API + frontend + PDF export in one container)
+
+```bash
+docker compose up --build          # http://localhost:8000
+```
+
+PDF export needs WeasyPrint's native libraries; the container has them.
+Bare-metal installs can add them via `pip install -e ".[pdf]"` plus the
+system Pango libraries — otherwise `/report/{id}/pdf` returns 501 and
+Markdown/HTML export still works.
+
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /research` | Start a job (`{company, website?, aliases?, ticker?}`) → 202 + job id |
+| `GET /status/{id}` | Stage timings, warnings, cost, report availability |
+| `GET /report/{id}?format=markdown\|html\|json` | The memo (Markdown is canonical) |
+| `GET /report/{id}/pdf` | PDF export (501 if natives absent) |
+| `GET /health` | Provider/model, enabled collectors, PDF capability |
+| `GET /metrics` | Prometheus text: jobs, LLM calls, tokens, cost, latency |
+
+Interactive docs at `/docs` (OpenAPI). Job flow: 202 → poll status
+(`queued → running → complete | partial | failed`) → fetch report. PARTIAL
+means the memo exists but something degraded (a source failed, or the cost
+budget truncated analysis) — the memo's Diagnostics section says what.
+
+## Configuration
+
+Everything loads from env / `.env` (`core/config.py`):
+
+| Variable | Default | Notes |
+|---|---|---|
+| `LLM_PROVIDER`, `LLM_MODEL` | `anthropic`, `claude-sonnet-5` | `openai` / `gemini` supported |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | — | one required for analysis |
+| `FIRECRAWL_API_KEY`, `SERPAPI_API_KEY` | — | optional; enable those collectors |
+| `SEC_EDGAR_USER_AGENT` | placeholder | set a real contact — SEC requires it |
+| `MAX_COST_PER_JOB_USD` | `5.0` | hard per-job LLM budget |
+| `COLLECTOR_TIMEOUT_SECONDS` | `90` | per-collector fence |
+| `STATIC_DIR` | — | serve a built frontend at `/` (set in Docker) |
+
+## Testing & quality bar
+
+```bash
+ruff check . && mypy && pytest     # backend: lint + strict types + tests
+cd frontend && npm test            # frontend: vitest
+```
+
+- **185+ tests**, none touching a real network: collectors are respx-mocked,
+  the LLM layer is exercised by a scripted `FakeLLM` (including adversarial
+  cases: fabricated citations, malformed output, budget exhaustion), and API
+  tests run the real app via ASGI transport.
+- `mypy --strict` with the Pydantic plugin across all backend packages;
+  TypeScript `strict` on the frontend.
+- CI (`.github/workflows/ci.yml`): Python 3.11/3.13 matrix, frontend
+  build+test, and a Docker job that builds the image and smoke-tests the
+  running container.
+
+## Deployment
+
+- **Cloud Run** (single container: API + UI + PDF): manual GitHub Action
+  **Deploy (Cloud Run)** — prerequisites documented in
+  [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). Runtime
+  secrets live in GCP Secret Manager, never in GitHub.
+- **Split hosting**: frontend on Vercel
+  ([`frontend/vercel.json`](frontend/vercel.json), point the rewrites at your
+  backend URL) + the API container anywhere.
+- Operations, symptom→action triage, and rollback:
+  [docs/runbooks/operations.md](docs/runbooks/operations.md).
 
 ## Project layout
 
 ```
-core/                 config (Settings) and shared domain types
-collectors/           provider adapters + Evidence model, registry, resilience
-  base.py             Evidence, CompanyTarget, CollectorResult, BaseCollector, errors
-  registry.py         credential-driven collector enablement
-  resilience.py       retry with exponential backoff
-  sec_edgar.py        SEC EDGAR (keyless, reliability 0.98)
-  firecrawl.py        company website → markdown (0.9)
-  serpapi.py          web + news search verticals (0.65)
-processors/           validation pipeline (Phase 2)
-tests/
-  unit/               evidence model, registry
-  integration/        respx-mocked collector tests
-docs/adr/             architecture decision records
+core/            Settings + shared domain types (DataCategory, JobStage, Basis…)
+collectors/      Evidence model, provider adapters, registry, retry/resilience
+processors/      validation pipeline → ProcessedCorpus (dedupe, quarantine, conflicts)
+llm/             provider adapters (Anthropic/OpenAI/Gemini), validation, FakeLLM
+analysis/        pass roster, prompts, budget-guarded engine
+orchestration/   run_research_job: collect → validate → analyze → report
+reports/         ReportContext, Jinja2 memo templates (md/html), PDF export
+api/             FastAPI app, job store, Prometheus metrics
+frontend/        React + TypeScript client (Vite)
+tests/           unit / integration / api (fixture corpus, FakeLLM, respx)
+docs/adr/        architecture decision records (0001–0005)
+docs/runbooks/   operations runbook
 ```
-
-## Quality bar
-
-- **Lint:** `ruff check .` (pycodestyle, pyflakes, isort, pyupgrade, bugbear,
-  simplify, and type-annotation rules).
-- **Types:** `mypy` in `--strict` mode with the Pydantic plugin.
-- **Tests:** `pytest`, with `pytest-asyncio` and `respx` for mocking HTTP.
-- **No live calls in CI.** External-API tests are marked `live` and excluded by
-  default (`addopts = -m 'not live'`); CI never hits real provider endpoints.
-- **CI** runs lint, type-check, and tests on Python 3.11 and 3.13
-  (`.github/workflows/ci.yml`).
-
-Run the full bar locally:
-
-```bash
-ruff check . && mypy && pytest
-```
-
-## Roadmap
-
-Planned, not yet implemented:
-
-- **LLM + analysis** — reason over the processed corpus, producing claims tagged
-  with `Basis` (sourced / inferred / assumption) and `Confidence`.
-- **Reports** — generate due-diligence reports with inline source attribution.
-- **API + frontend** — job submission, async processing (Redis-backed queue),
-  and a UI for browsing evidence and reports.
 
 ## Architecture decisions
 
-- [ADR 0001 — Evidence-first data collection architecture](docs/adr/0001-evidence-first-architecture.md)
-- [ADR 0002 — Data-processing and validation pipeline](docs/adr/0002-data-processing-pipeline.md)
+1. [Evidence-first data collection](docs/adr/0001-evidence-first-architecture.md)
+2. [Data-processing and validation pipeline](docs/adr/0002-data-processing-pipeline.md)
+3. [LLM abstraction and citation enforcement](docs/adr/0003-llm-abstraction-and-citation-enforcement.md)
+4. [Analysis passes, budgets, and orchestration](docs/adr/0004-analysis-passes-and-orchestration.md)
+5. [API, job store, and single-container deployment](docs/adr/0005-api-and-single-container-deployment.md)
