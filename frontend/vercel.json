@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/research", "destination": "https://REPLACE-WITH-BACKEND-URL/research" },
+    { "source": "/status/:path*", "destination": "https://REPLACE-WITH-BACKEND-URL/status/:path*" },
+    { "source": "/report/:path*", "destination": "https://REPLACE-WITH-BACKEND-URL/report/:path*" },
+    { "source": "/health", "destination": "https://REPLACE-WITH-BACKEND-URL/health" }
+  ]
+}

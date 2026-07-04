@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/ira"
     redis_url: str = "redis://localhost:6379/0"
 
+    # --- Static frontend (served by the API when the directory exists) ---
+    static_dir: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

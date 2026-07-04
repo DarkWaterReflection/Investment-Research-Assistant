@@ -78,9 +78,9 @@ def website_llm():
 
 
 @asynccontextmanager
-async def running_app(**kwargs):
+async def running_app(settings=None, **kwargs):
     kwargs.setdefault("collectors", [StubCollector()])
-    app = create_app(Settings(_env_file=None), **kwargs)
+    app = create_app(settings if settings is not None else Settings(_env_file=None), **kwargs)
     async with LifespanManager(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -195,6 +195,23 @@ async def test_metrics_expose_job_and_token_counters():
         assert "ira_llm_calls_total 3" in text
         assert 'ira_llm_tokens_total{direction="input"} 300' in text
         assert "ira_job_duration_seconds_count 1" in text
+
+
+async def test_serves_frontend_when_static_dir_configured(tmp_path):
+    (tmp_path / "index.html").write_text("<html><body>IRA frontend</body></html>")
+    settings = Settings(_env_file=None, static_dir=str(tmp_path))
+
+    async with running_app(settings=settings, provider=website_llm()) as (_, client):
+        page = await client.get("/")
+        assert page.status_code == 200
+        assert "IRA frontend" in page.text
+        # API routes are registered before the mount and always win.
+        assert (await client.get("/health")).status_code == 200
+
+
+async def test_root_is_404_without_static_dir():
+    async with running_app(provider=website_llm()) as (_, client):
+        assert (await client.get("/")).status_code == 404
 
 
 async def test_pdf_export_returns_501_without_weasyprint(monkeypatch):

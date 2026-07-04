@@ -1,0 +1,56 @@
+# Manual deploy to Google Cloud Run.
+#
+# Prerequisites (one-time setup in GCP + repo settings):
+#   Repository variables: GCP_PROJECT_ID, GCP_REGION (e.g. europe-west1)
+#   Repository secrets:   GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT
+#   An Artifact Registry docker repo named "ira" in that project/region.
+#   Runtime secrets (ANTHROPIC_API_KEY etc.) live in GCP Secret Manager and
+#   are attached to the Cloud Run service, never in GitHub.
+
+name: Deploy (Cloud Run)
+
+on:
+  workflow_dispatch:
+
+concurrency: deploy-cloud-run
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/ira/api:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and push image
+        run: |
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ira-api \
+            --image "$IMAGE" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --allow-unauthenticated \
+            --memory 1Gi \
+            --cpu 1 \
+            --min-instances 0 \
+            --max-instances 3 \
+            --timeout 600

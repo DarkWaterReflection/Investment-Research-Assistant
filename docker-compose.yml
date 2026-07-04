@@ -1,0 +1,18 @@
+# Local production-like run: one container serving API + frontend on :8000.
+# API keys come from .env (never baked into the image).
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ENVIRONMENT: docker
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s

@@ -12,9 +12,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from api.jobs import JobStore
 from api.metrics import Metrics
@@ -62,6 +64,13 @@ def create_app(
         lifespan=lifespan,
     )
     app.include_router(router)
+
+    # Serve the built frontend when present (single-container deploys). API
+    # routes are registered first, so they always win over the static mount.
+    if app_settings.static_dir is not None:
+        static = Path(app_settings.static_dir)
+        if static.is_dir():
+            app.mount("/", StaticFiles(directory=static, html=True), name="frontend")
     return app
 
 
