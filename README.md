@@ -1,18 +1,40 @@
 # Investment Research Assistant
 
-AI-powered investment due diligence with **source attribution**. Give it a
-company name; it gathers evidence from regulatory filings, the company's own
-website, and web/news search, validates and scores that evidence, runs a
-citation-enforced LLM analysis, and produces an investment memo in which
-**every sourced claim is a numbered footnote back to the bytes it came from**
-— exportable as Markdown, HTML, or PDF.
+**AI due diligence that shows its receipts.** Give it a company name — it collects evidence from SEC filings, the company's website, and news search, validates and scores every datum, runs a citation-enforced LLM analysis, and delivers an investment memo where **every factual claim is a numbered footnote back to its source**. Export as Markdown, HTML, or PDF.
 
-The guiding principle: an unsourced or mis-attributed fact is worse than a
-missing one. Every datum is an **`Evidence`** record carrying its verbatim
-payload, source URL, timestamps, and reliability score; every analytical
-claim is a **`Finding`** labeled *sourced*, *inferred*, or *assumption* — and
-a "sourced" claim that can't cite real evidence is downgraded, visibly, to an
-inference. Facts and guesses never blur.
+[![CI](https://github.com/DarkWaterReflection/Investment-Research-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/DarkWaterReflection/Investment-Research-Assistant/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%20%7C%203.13-blue)
+![Types](https://img.shields.io/badge/mypy-strict-blue)
+![Frontend](https://img.shields.io/badge/react-18%20%2B%20TS%20strict-61dafb)
+![Docker](https://img.shields.io/badge/docker-single%20image-2496ed)
+
+---
+
+## Why it's different
+
+Most LLM research tools hand you fluent prose and ask for your trust. This one is built on a harder rule: **an unsourced or mis-attributed fact is worse than a missing one.**
+
+- 🔍 **Every claim is labeled** — `sourced`, `inferred`, or `assumption` — and sourced claims must cite real evidence IDs. Facts and guesses never blur.
+- 🚫 **Fabricated citations can't survive.** If the model "sources" a claim to evidence that doesn't exist, the system retries once, then **visibly downgrades the claim to an inference** — it never reaches the memo as fact.
+- ⚖️ **Disagreements are surfaced, not resolved.** Two sources report different Series B sizes? The memo shows both figures and flags the conflict. Auto-picking a winner would launder a guess into a fact.
+- 🗂️ **Wrong-company evidence is quarantined, never silently mixed in** — the deadliest failure mode of automated research ("Apple" the fruit supplier) is contained and auditable.
+- 💰 **Hard cost ceiling per job.** Analysis stops at the budget and says so; a partial memo with an honest gap beats a complete one that overran.
+
+### What a memo looks like
+
+```markdown
+### Key Concerns
+- Series B round size is disputed across sources[2][5] — sourced, high confidence
+- Probably raising again within 12 months — inferred, medium confidence
+
+## Data Quality
+- 23 evidence item(s) analyzed; 4 duplicate(s) merged; 2 item(s) quarantined.
+- 1 unresolved conflict(s): Series B reported as $40M[2] vs $52M[5].
+
+## Sources
+2. [Acme raises $40M Series B](https://news.example/acme-40m) — serpapi, 2026-06-30
+5. [Acme Robotics S-1 filing](https://sec.gov/...) — sec_edgar, 2026-05-12
+```
 
 ## How it works
 
@@ -25,138 +47,96 @@ POST /research
 │ collectors/│   │ processors/ │   │ analysis/  │   │  reports/  │   (md/html/pdf)
 └────────────┘   └─────────────┘   └─────┬──────┘   └────────────┘
  SEC EDGAR        clean → dedupe →       │ llm/  (Anthropic │ OpenAI │ Gemini)
- Firecrawl        entity-resolve →       │ structured output + citation
+ Firecrawl        entity-resolve →       │ structured output, citation
  SerpAPI          confidence →           │ enforcement, cost budget
  (auto-enable     conflicts → timeline   │
-  by credential)  quarantine, never delete
+  by credential)  quarantine, not delete │
 ```
 
-- **`collectors/`** — one adapter per provider, all emitting `Evidence`. The
-  registry auto-enables each collector when its credentials exist; keyless
-  SEC EDGAR is always on. Reliability priors: SEC `0.98`, website `0.9`,
-  search `0.65`. ([ADR 0001](docs/adr/0001-evidence-first-architecture.md))
-- **`processors/`** — the validation pipeline: clean → dedupe →
-  entity-resolve → confidence → conflicts → timeline. Off-target evidence is
-  quarantined, never deleted; conflicting figures (two sizes for one funding
-  round) are surfaced, never auto-resolved.
-  ([ADR 0002](docs/adr/0002-data-processing-pipeline.md))
-- **`llm/`** — provider-agnostic structured output over raw HTTP (no vendor
-  SDKs), with schema validation (one repair retry) and **citation
-  enforcement**: sourced findings must cite real evidence IDs or they are
-  downgraded to inferred with a warning.
-  ([ADR 0003](docs/adr/0003-llm-abstraction-and-citation-enforcement.md))
-- **`analysis/`** — a declarative roster of passes (company profile, market,
-  team, funding, traction, risks) plus a synthesis, run sequentially under a
-  hard per-job cost budget. The risks pass sees unresolved conflicts and
-  quarantine stats — source disagreement *is* risk signal.
-  ([ADR 0004](docs/adr/0004-analysis-passes-and-orchestration.md))
-- **`orchestration/` + `reports/`** — the job pipeline with per-stage timing;
-  one failing source degrades the job to PARTIAL instead of killing it. The
-  memo renders with numbered source footnotes, a data-quality section, the
-  event timeline, and diagnostics.
-- **`api/` + `frontend/`** — FastAPI (async jobs, Prometheus metrics) and a
-  React client (submit → live stage progress → interactive memo).
-  ([ADR 0005](docs/adr/0005-api-and-single-container-deployment.md))
+| Layer | What it does |
+|---|---|
+| `collectors/` | One adapter per source, all emitting `Evidence` (verbatim payload + URL + reliability prior). Auto-enabled by credentials; keyless SEC EDGAR always on. |
+| `processors/` | Clean → dedupe → entity-resolve → confidence-score → conflict-detect → timeline. Immutable transforms; nothing is destroyed. |
+| `llm/` | Provider-agnostic structured output over raw HTTP (no vendor SDKs), schema repair, citation enforcement. Swap vendors with one env var. |
+| `analysis/` | Declarative pass roster (profile, market, team, funding, traction, risks) + synthesis, under a deterministic budget guard. |
+| `orchestration/` | The job pipeline. One failing source degrades to PARTIAL — it never kills the job. |
+| `reports/` | `ReportContext` → Jinja2 → Markdown/HTML/PDF with numbered footnotes. |
+| `api/` + `frontend/` | Async FastAPI jobs + Prometheus metrics; React client with live stage progress and an interactive memo. |
 
 ## Quickstart
 
-### Backend (Python 3.11+)
+**Docker — everything in one container (API + UI + PDF export):**
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+cp .env.example .env               # add your LLM key (see Configuration)
+docker compose up --build          # → http://localhost:8000
+```
+
+**Local development:**
+
+```bash
+# Backend (Python 3.11+)
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-cp .env.example .env               # add keys; all data-provider keys optional
-uvicorn api.app:app --reload       # http://localhost:8000/docs
+uvicorn api.app:app --reload       # → http://localhost:8000/docs
+
+# Frontend (Node 20+)
+cd frontend && npm install && npm run dev            # → http://localhost:5173
 ```
 
-With no data-provider keys, keyless SEC EDGAR still collects. `POST /research`
-needs one LLM key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or
-`GEMINI_API_KEY`) matching `LLM_PROVIDER`.
-
-### Frontend (Node 20+)
+Then research a company:
 
 ```bash
-cd frontend
-npm install
-npm run dev                        # http://localhost:5173 (proxies API to :8000)
+curl -X POST localhost:8000/research -H "Content-Type: application/json" \
+     -d '{"company": "Tesla", "ticker": "TSLA"}'
+# → {"job_id": "…"}  → poll /status/{id} → GET /report/{id}
 ```
-
-### Docker (API + frontend + PDF export in one container)
-
-```bash
-docker compose up --build          # http://localhost:8000
-```
-
-PDF export needs WeasyPrint's native libraries; the container has them.
-Bare-metal installs can add them via `pip install -e ".[pdf]"` plus the
-system Pango libraries — otherwise `/report/{id}/pdf` returns 501 and
-Markdown/HTML export still works.
 
 ## API
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /research` | Start a job (`{company, website?, aliases?, ticker?}`) → 202 + job id |
+| `POST /research` | Start a job → `202` + job id |
 | `GET /status/{id}` | Stage timings, warnings, cost, report availability |
-| `GET /report/{id}?format=markdown\|html\|json` | The memo (Markdown is canonical) |
-| `GET /report/{id}/pdf` | PDF export (501 if natives absent) |
-| `GET /health` | Provider/model, enabled collectors, PDF capability |
-| `GET /metrics` | Prometheus text: jobs, LLM calls, tokens, cost, latency |
+| `GET /report/{id}?format=markdown\|html\|json` | The memo |
+| `GET /report/{id}/pdf` | PDF export (`501` if native libs absent — the container has them) |
+| `GET /health` | Provider, enabled collectors, PDF capability |
+| `GET /metrics` | Prometheus: jobs, LLM calls, tokens, cost USD, latency |
 
-Interactive docs at `/docs` (OpenAPI). Job flow: 202 → poll status
-(`queued → running → complete | partial | failed`) → fetch report. PARTIAL
-means the memo exists but something degraded (a source failed, or the cost
-budget truncated analysis) — the memo's Diagnostics section says what.
+Interactive OpenAPI docs at `/docs`. Job states: `queued → running → complete | partial | failed` — `partial` means the memo exists but something degraded, and its Diagnostics section says exactly what.
 
 ## Configuration
 
-Everything loads from env / `.env` (`core/config.py`):
+Everything loads from env / `.env` (`core/config.py`). No keys at all still works — keyless SEC EDGAR collects, and only `POST /research` requires an LLM key.
 
 | Variable | Default | Notes |
 |---|---|---|
 | `LLM_PROVIDER`, `LLM_MODEL` | `anthropic`, `claude-sonnet-5` | `openai` / `gemini` supported |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | — | one required for analysis |
-| `FIRECRAWL_API_KEY`, `SERPAPI_API_KEY` | — | optional; enable those collectors |
+| `FIRECRAWL_API_KEY`, `SERPAPI_API_KEY` | — | optional; enable website/news collectors |
 | `SEC_EDGAR_USER_AGENT` | placeholder | set a real contact — SEC requires it |
 | `MAX_COST_PER_JOB_USD` | `5.0` | hard per-job LLM budget |
 | `COLLECTOR_TIMEOUT_SECONDS` | `90` | per-collector fence |
-| `STATIC_DIR` | — | serve a built frontend at `/` (set in Docker) |
 
-## Testing & quality bar
+## Engineering quality
 
-```bash
-ruff check . && mypy && pytest     # backend: lint + strict types + tests
-cd frontend && npm test            # frontend: vitest
-```
-
-- **185+ tests**, none touching a real network: collectors are respx-mocked,
-  the LLM layer is exercised by a scripted `FakeLLM` (including adversarial
-  cases: fabricated citations, malformed output, budget exhaustion), and API
-  tests run the real app via ASGI transport.
-- `mypy --strict` with the Pydantic plugin across all backend packages;
-  TypeScript `strict` on the frontend.
-- CI (`.github/workflows/ci.yml`): Python 3.11/3.13 matrix, frontend
-  build+test, and a Docker job that builds the image and smoke-tests the
-  running container.
+- **186 tests, zero network.** Collectors are respx-mocked; the LLM layer runs against a scripted `FakeLLM` including an adversarial suite (fabricated citations, malformed output, budget exhaustion); API tests exercise the real app — lifespan, background jobs, static mount — via ASGI transport.
+- **Strict everywhere.** `mypy --strict` (Pydantic plugin) across all nine backend packages; `ruff` with bugbear/simplify/annotation rules; TypeScript `strict` on the frontend.
+- **CI proves the artifact.** Python 3.11/3.13 matrix, frontend build+test, and a Docker job that builds the production image and smoke-tests the *running container*.
+- **Decisions are written down.** Five ADRs record the why and the trade-offs, including known debts (in-memory job store, rule-based NER) with explicit revisit criteria.
+- **Ops-ready.** Prometheus metrics, health checks, a symptom→action [runbook](docs/runbooks/operations.md), non-root container, secrets never in the image or repo.
 
 ## Deployment
 
-- **Cloud Run** (single container: API + UI + PDF): manual GitHub Action
-  **Deploy (Cloud Run)** — prerequisites documented in
-  [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). Runtime
-  secrets live in GCP Secret Manager, never in GitHub.
-- **Split hosting**: frontend on Vercel
-  ([`frontend/vercel.json`](frontend/vercel.json), point the rewrites at your
-  backend URL) + the API container anywhere.
-- Operations, symptom→action triage, and rollback:
-  [docs/runbooks/operations.md](docs/runbooks/operations.md).
+- **Cloud Run** — one-click GitHub Action (`Deploy (Cloud Run)`), auth via Workload Identity Federation, runtime secrets in GCP Secret Manager. Prereqs documented in [`deploy.yml`](.github/workflows/deploy.yml).
+- **Split hosting** — frontend on Vercel ([`frontend/vercel.json`](frontend/vercel.json)), API container anywhere.
+- **Anywhere Docker runs** — `docker compose up --build`.
 
 ## Project layout
 
 ```
 core/            Settings + shared domain types (DataCategory, JobStage, Basis…)
-collectors/      Evidence model, provider adapters, registry, retry/resilience
+collectors/      Evidence model, source adapters, registry, retry/resilience
 processors/      validation pipeline → ProcessedCorpus (dedupe, quarantine, conflicts)
 llm/             provider adapters (Anthropic/OpenAI/Gemini), validation, FakeLLM
 analysis/        pass roster, prompts, budget-guarded engine
@@ -164,9 +144,8 @@ orchestration/   run_research_job: collect → validate → analyze → report
 reports/         ReportContext, Jinja2 memo templates (md/html), PDF export
 api/             FastAPI app, job store, Prometheus metrics
 frontend/        React + TypeScript client (Vite)
-tests/           unit / integration / api (fixture corpus, FakeLLM, respx)
-docs/adr/        architecture decision records (0001–0005)
-docs/runbooks/   operations runbook
+tests/           unit / integration / api — fixture corpus, FakeLLM, respx
+docs/            ADRs 0001–0005 + operations runbook
 ```
 
 ## Architecture decisions
