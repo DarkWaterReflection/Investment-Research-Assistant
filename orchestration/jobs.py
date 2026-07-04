@@ -1,10 +1,10 @@
-"""End-to-end research job orchestration: collect → validate → analyze.
+"""End-to-end research job orchestration: collect → validate → analyze → report.
 
 One failing collector never fails the job — its error becomes a warning and
 the job degrades to PARTIAL. The job FAILS only when there is nothing to
 analyze: no collectors enabled, no evidence collected, or everything
-quarantined as off-target. Report generation (GENERATING) attaches in the
-reports phase; until then jobs terminate after analysis.
+quarantined as off-target. GENERATING renders the canonical Markdown memo;
+HTML/PDF exports are derived on demand from the same ReportContext.
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ from core.config import Settings
 from core.types import JobStage
 from llm.base import BaseLLMProvider
 from processors.pipeline import ProcessedCorpus, ValidationPipeline
+from reports.context import build_report_context
+from reports.render import render_markdown
 
 
 class StageRecord(BaseModel):
@@ -47,6 +49,7 @@ class ResearchJobResult(BaseModel):
     collector_results: list[CollectorResult] = Field(default_factory=list)
     corpus: ProcessedCorpus | None = None
     analysis: AnalysisResult | None = None
+    report_markdown: str | None = None
     warnings: list[str] = Field(default_factory=list)
     total_cost_usd: float = 0.0
 
@@ -129,4 +132,19 @@ async def run_research_job(
 
     degraded = collector_failures > 0 or analysis.budget_exhausted
     result.stage = JobStage.PARTIAL if degraded else JobStage.COMPLETE
+
+    # --- GENERATING: render the canonical Markdown memo ---
+    start = time.perf_counter()
+    context = build_report_context(
+        company=target.name,
+        corpus=corpus,
+        analysis=analysis,
+        stage=str(result.stage),
+        total_cost_usd=result.total_cost_usd,
+        warnings=result.warnings,
+    )
+    result.report_markdown = render_markdown(context)
+    result.stages.append(
+        StageRecord(stage=JobStage.GENERATING, duration_seconds=time.perf_counter() - start)
+    )
     return result

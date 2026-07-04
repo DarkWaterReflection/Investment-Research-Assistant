@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Investment Memo — {{ ctx.company }}</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; max-width: 52rem;
+         margin: 2rem auto; padding: 0 1.5rem; color: #1a1a1a; line-height: 1.55; }
+  h1 { border-bottom: 3px solid #1a1a1a; padding-bottom: .4rem; }
+  h2 { border-bottom: 1px solid #ccc; padding-bottom: .25rem; margin-top: 2.2rem; }
+  .meta { color: #555; font-style: italic; margin-bottom: 1.5rem; }
+  .finding { margin: .35rem 0; }
+  .basis { color: #666; font-size: .9em; font-style: italic; }
+  .cite { color: #0a58ca; font-size: .85em; vertical-align: super; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: .35rem .6rem; text-align: left; font-size: .95em; }
+  ol.sources li { margin: .3rem 0; font-size: .95em; }
+  .warn { background: #fff8e1; border-left: 4px solid #f0ad4e; padding: .5rem .8rem; }
+</style>
+</head>
+<body>
+<h1>Investment Memo — {{ ctx.company }}</h1>
+<p class="meta">Generated {{ ctx.generated_at.strftime("%Y-%m-%d %H:%M UTC") }} ·
+Status: {{ ctx.stats.stage }} · Evidence: {{ ctx.stats.evidence_count }} items ·
+Analysis cost: ${{ "%.2f"|format(ctx.stats.total_cost_usd) }}</p>
+
+{% macro findings_list(findings) -%}
+<ul>
+{% for f in findings %}
+  <li class="finding">{{ f.claim }}<span class="cite">{{ f.citations|cite }}</span>
+      <span class="basis">({{ f.basis }}, {{ f.confidence }} confidence)</span></li>
+{% endfor %}
+</ul>
+{%- endmacro %}
+
+{% if ctx.executive_summary %}
+<h2>Executive Summary</h2>
+<p>{{ ctx.executive_summary }}</p>
+{% endif %}
+
+{% if ctx.investment_thesis %}
+<h2>Investment Thesis</h2>
+<p>{{ ctx.investment_thesis }}</p>
+{% endif %}
+
+{% if ctx.strengths %}<h3>Key Strengths</h3>{{ findings_list(ctx.strengths) }}{% endif %}
+{% if ctx.concerns %}<h3>Key Concerns</h3>{{ findings_list(ctx.concerns) }}{% endif %}
+
+{% if ctx.open_questions %}
+<h3>Open Questions</h3>
+<ul>{% for q in ctx.open_questions %}<li>{{ q }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% for section in ctx.sections %}
+<h2>{{ section.title }}</h2>
+<p>{{ section.summary }}</p>
+{% if section.findings %}{{ findings_list(section.findings) }}{% endif %}
+{% endfor %}
+
+<h2>Data Quality</h2>
+<ul>
+  <li>{{ ctx.stats.evidence_count }} evidence item(s) analyzed;
+      {{ ctx.stats.merged_count }} duplicate(s) merged;
+      {{ ctx.stats.quarantined_count }} item(s) quarantined as possibly off-target.</li>
+  <li>{{ ctx.stats.conflict_count }} unresolved conflict(s) between sources.</li>
+</ul>
+{% if ctx.conflicts %}
+<h3>Unresolved Conflicts</h3>
+<ul>{% for conflict in ctx.conflicts %}<li>{{ conflict }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if ctx.timeline %}
+<h2>Timeline</h2>
+<table>
+<tr><th>Date</th><th>Event</th><th>Category</th></tr>
+{% for row in ctx.timeline %}
+<tr><td>{{ row.date }}</td><td>{{ row.title }}</td><td>{{ row.category }}</td></tr>
+{% endfor %}
+</table>
+{% endif %}
+
+{% if ctx.sources %}
+<h2>Sources</h2>
+<ol class="sources">
+{% for s in ctx.sources %}
+  <li value="{{ s.number }}"><a href="{{ s.url }}">{{ s.title }}</a> —
+      {{ s.collector }}{% if s.published %}, published {{ s.published }}{% endif %}</li>
+{% endfor %}
+</ol>
+{% endif %}
+
+{% if ctx.warnings %}
+<h2>Diagnostics</h2>
+<div class="warn"><ul>{% for w in ctx.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
+{% endif %}
+</body>
+</html>

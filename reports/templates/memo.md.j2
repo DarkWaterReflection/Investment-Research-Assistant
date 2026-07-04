@@ -1,0 +1,66 @@
+# Investment Memo — {{ ctx.company }}
+
+*Generated {{ ctx.generated_at.strftime("%Y-%m-%d %H:%M UTC") }} · Status: {{ ctx.stats.stage }} · Evidence: {{ ctx.stats.evidence_count }} items · Analysis cost: ${{ "%.2f"|format(ctx.stats.total_cost_usd) }}*
+{% if ctx.executive_summary %}
+## Executive Summary
+
+{{ ctx.executive_summary }}
+{% endif %}{% if ctx.investment_thesis %}
+## Investment Thesis
+
+{{ ctx.investment_thesis }}
+{% endif %}{% if ctx.strengths %}
+### Key Strengths
+{% for f in ctx.strengths %}
+- {{ f.claim }}{{ f.citations|cite }} — *{{ f.basis }}, {{ f.confidence }} confidence*
+{%- endfor %}
+{% endif %}{% if ctx.concerns %}
+### Key Concerns
+{% for f in ctx.concerns %}
+- {{ f.claim }}{{ f.citations|cite }} — *{{ f.basis }}, {{ f.confidence }} confidence*
+{%- endfor %}
+{% endif %}{% if ctx.open_questions %}
+### Open Questions
+{% for q in ctx.open_questions %}
+- {{ q }}
+{%- endfor %}
+{% endif %}
+{% for section in ctx.sections %}
+## {{ section.title }}
+
+{{ section.summary }}
+{% if section.findings %}
+{% for f in section.findings %}
+- {{ f.claim }}{{ f.citations|cite }} — *{{ f.basis }}, {{ f.confidence }} confidence*
+{%- endfor %}
+{% endif %}
+{%- endfor %}
+
+## Data Quality
+
+- {{ ctx.stats.evidence_count }} evidence item(s) analyzed; {{ ctx.stats.merged_count }} duplicate(s) merged; {{ ctx.stats.quarantined_count }} item(s) quarantined as possibly off-target.
+- {{ ctx.stats.conflict_count }} unresolved conflict(s) between sources.
+{% if ctx.conflicts %}
+### Unresolved Conflicts
+{% for conflict in ctx.conflicts %}
+- {{ conflict }}
+{%- endfor %}
+{% endif %}{% if ctx.timeline %}
+## Timeline
+
+| Date | Event | Category |
+|------|-------|----------|
+{% for row in ctx.timeline -%}
+| {{ row.date }} | {{ row.title }} | {{ row.category }} |
+{% endfor %}
+{%- endif %}{% if ctx.sources %}
+## Sources
+{% for s in ctx.sources %}
+{{ s.number }}. [{{ s.title }}]({{ s.url }}) — {{ s.collector }}{% if s.published %}, published {{ s.published }}{% endif %}
+{%- endfor %}
+{% endif %}{% if ctx.warnings %}
+## Diagnostics
+{% for w in ctx.warnings %}
+- {{ w }}
+{%- endfor %}
+{% endif %}

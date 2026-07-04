@@ -88,11 +88,14 @@ async def test_happy_path_completes_with_stage_records():
         JobStage.COLLECTING,
         JobStage.VALIDATING,
         JobStage.ANALYZING,
+        JobStage.GENERATING,
     ]
     assert result.corpus is not None
     assert len(result.corpus.evidence) == 2
     assert result.analysis is not None
     assert result.analysis.synthesis is not None
+    assert result.report_markdown is not None
+    assert "# Investment Memo — Acme Robotics" in result.report_markdown
 
 
 async def test_one_failing_collector_degrades_to_partial():
@@ -108,6 +111,7 @@ async def test_one_failing_collector_degrades_to_partial():
     assert result.stage is JobStage.PARTIAL
     assert any("throttled" in w for w in result.warnings)
     assert result.analysis is not None  # healthy evidence still analyzed
+    assert result.report_markdown is not None  # partial jobs still get a memo
 
 
 async def test_hanging_collector_times_out_and_degrades():
@@ -141,6 +145,7 @@ async def test_all_collectors_failing_fails_the_job():
     assert result.stage is JobStage.FAILED
     assert result.corpus is None
     assert result.analysis is None
+    assert result.report_markdown is None
     assert len(fake.calls) == 0
 
 
