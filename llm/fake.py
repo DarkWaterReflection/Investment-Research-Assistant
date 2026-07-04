@@ -30,8 +30,11 @@ class FakeLLM(BaseLLMProvider):
     name = "fake"
     model = "fake-1"
 
-    def __init__(self, responses: list[dict[str, Any] | Exception]) -> None:
+    def __init__(
+        self, responses: list[dict[str, Any] | Exception], *, cost_per_call: float = 0.0
+    ) -> None:
         self._queue = list(responses)
+        self._cost_per_call = cost_per_call
         self.calls: list[FakeCall] = []
 
     async def complete_structured(
@@ -57,7 +60,7 @@ class FakeLLM(BaseLLMProvider):
                 model=self.model,
                 input_tokens=100,
                 output_tokens=50,
-                cost_usd=0.0,
+                cost_usd=self._cost_per_call,
                 latency_seconds=0.0,
             ),
         )

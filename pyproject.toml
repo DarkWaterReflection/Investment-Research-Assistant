@@ -24,7 +24,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["core", "collectors", "processors", "llm", "llm.providers"]
+packages = ["core", "collectors", "processors", "llm", "llm.providers", "analysis", "orchestration"]
 
 [tool.ruff]
 line-length = 100
@@ -41,7 +41,7 @@ ignore = ["ANN401"]
 python_version = "3.11"
 plugins = ["pydantic.mypy"]
 strict = true
-files = ["core", "collectors", "processors", "llm"]
+files = ["core", "collectors", "processors", "llm", "analysis", "orchestration"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
